@@ -1,0 +1,66 @@
+{
+  "title": "StreamRTSP",
+  "children": [
+    {
+      "title": "Overview",
+      "lines": [
+        "Local RTSP audio",
+        "receiver for Move.",
+        "",
+        "Designed for",
+        "Android",
+        "ScreenStream",
+        "senders.",
+        "",
+        "Audio-only path,",
+        "quality first."
+      ]
+    },
+    {
+      "title": "Setup",
+      "lines": [
+        "1. Build:",
+        "   ./scripts/build.sh",
+        "",
+        "2. Install:",
+        "   ./scripts/install.sh",
+        "",
+        "3. Start sender",
+        "   on Android",
+        "",
+        "4. Load module",
+        "   in a slot",
+        "",
+        "5. Connect to",
+        "   discovered RTSP",
+        "   sender"
+      ]
+    },
+    {
+      "title": "Controls",
+      "lines": [
+        "Scan: refresh",
+        "local sender list",
+        "",
+        "Connect/Restart:",
+        "manage session",
+        "",
+        "Quality mode:",
+        "stability-first",
+        "buffering policy"
+      ]
+    },
+    {
+      "title": "Status",
+      "lines": [
+        "Disconnected",
+        "Scanning",
+        "Connecting",
+        "Buffering",
+        "Streaming",
+        "Reconnecting",
+        "Error"
+      ]
+    }
+  ]
+}
