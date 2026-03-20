@@ -8,19 +8,24 @@ if [ ! -f "$ui_file" ]; then
   exit 1
 fi
 
-if rg -q 'IP Suffix' "$ui_file"; then
-  echo "FAIL: UI should not expose IP suffix controls" >&2
+if ! rg -q 'IP Suffix:' "$ui_file"; then
+  echo "FAIL: UI should expose IP suffix controls in manual mode" >&2
   exit 1
 fi
 
-if rg -q "host_module_set_param\('connect_suffix'" "$ui_file"; then
-  echo "FAIL: UI should not trigger connect_suffix manual endpoint flow" >&2
+if ! rg -q 'Port:' "$ui_file"; then
+  echo "FAIL: UI should expose editable port in manual mode" >&2
   exit 1
 fi
 
-if rg -q 'Source IP Suffix' "$ui_file"; then
-  echo "FAIL: UI should not open source suffix text entry" >&2
+if ! rg -q 'Path:' "$ui_file"; then
+  echo "FAIL: UI should expose editable path in manual mode" >&2
   exit 1
 fi
 
-echo "PASS: UI IP suffix controls removed"
+if ! rg -q '\[Connect\]' "$ui_file"; then
+  echo "FAIL: UI should expose Connect action in manual mode" >&2
+  exit 1
+fi
+
+echo "PASS: UI manual endpoint controls are visible"

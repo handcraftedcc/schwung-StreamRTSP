@@ -40,8 +40,8 @@ if ! rg -q 'strcmp\(key, "restart"\)' "$plugin_file"; then
   exit 1
 fi
 
-if ! rg -q 'restart requested without endpoint; triggering scan' "$plugin_file"; then
-  echo "FAIL: restart path should log and trigger scan when endpoint is missing" >&2
+if ! rg -q 'set_error\(inst, "no endpoint configured"\)' "$plugin_file"; then
+  echo "FAIL: restart path should surface explicit error when endpoint is missing" >&2
   exit 1
 fi
 

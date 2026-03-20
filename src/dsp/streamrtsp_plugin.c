@@ -23,8 +23,11 @@
 #define RECONNECT_COOLDOWN_MS 1500
 #define LOG_PATH "/data/UserData/move-anything/cache/streamrtsp-runtime.log"
 #define CACHE_DIR_DEFAULT "/data/UserData/move-anything/cache/streamrtsp"
-#define MANUAL_SUFFIX_DEFAULT 118
+#define MANUAL_SUFFIX_DEFAULT 0
+#define MANUAL_PORT_DEFAULT 8554
+#define MANUAL_PATH_DEFAULT "screen"
 #define MAX_DISCOVERY_CANDIDATES 16
+#define MAX_HISTORY_ENTRIES 5
 
 static const host_api_v1_t *g_host = NULL;
 static int g_instance_counter = 0;
@@ -37,6 +40,9 @@ typedef struct {
     char last_sender_path[512];
     char auto_reconnect_path[512];
     char manual_suffix_path[512];
+    char manual_port_path[512];
+    char manual_path_path[512];
+    char history_path[512];
     char endpoint[512];
     char discovered_url[512];
     char discovered_name[128];
@@ -46,6 +52,7 @@ typedef struct {
     char network_prefix[32];
     char state[32];
     char error_msg[256];
+    char last_error_detail[256];
 
     int slot;
     int fifo_fd;
@@ -55,6 +62,10 @@ typedef struct {
     bool scan_running;
     bool auto_reconnect;
     int manual_suffix;
+    int manual_port;
+    char manual_path[128];
+    char history_endpoints[MAX_HISTORY_ENTRIES][512];
+    int history_count;
 
     int buffer_mode; /* 96=Normal, 160=Safe, 320=Max Stability */
     float gain;
@@ -103,9 +114,19 @@ static void set_state(streamrtsp_instance_t *inst, const char *state) {
     snprintf(inst->state, sizeof(inst->state), "%s", state);
 }
 
+static void set_last_error_detail(streamrtsp_instance_t *inst, const char *msg) {
+    if (!inst) return;
+    if (!msg || msg[0] == '\0') {
+        inst->last_error_detail[0] = '\0';
+        return;
+    }
+    snprintf(inst->last_error_detail, sizeof(inst->last_error_detail), "%s", msg);
+}
+
 static void set_error(streamrtsp_instance_t *inst, const char *msg) {
     if (!inst) return;
     snprintf(inst->error_msg, sizeof(inst->error_msg), "%s", msg ? msg : "unknown error");
+    set_last_error_detail(inst, inst->error_msg);
     set_state(inst, "error");
     ap_log(inst->error_msg);
 }
@@ -329,7 +350,7 @@ static void load_manual_suffix(streamrtsp_instance_t *inst) {
         inst->manual_suffix = MANUAL_SUFFIX_DEFAULT;
         return;
     }
-    if (fscanf(fp, "%d", &v) == 1 && v >= 1 && v <= 254) {
+    if (fscanf(fp, "%d", &v) == 1 && v >= 0 && v <= 254) {
         inst->manual_suffix = v;
     } else {
         inst->manual_suffix = MANUAL_SUFFIX_DEFAULT;
@@ -337,13 +358,204 @@ static void load_manual_suffix(streamrtsp_instance_t *inst) {
     fclose(fp);
 }
 
+static void save_manual_port(streamrtsp_instance_t *inst) {
+    FILE *fp;
+    if (!inst) return;
+    fp = fopen(inst->manual_port_path, "w");
+    if (!fp) return;
+    fprintf(fp, "%d\n", inst->manual_port);
+    fclose(fp);
+}
+
+static void load_manual_port(streamrtsp_instance_t *inst) {
+    FILE *fp;
+    int v = MANUAL_PORT_DEFAULT;
+    if (!inst) return;
+    fp = fopen(inst->manual_port_path, "r");
+    if (!fp) {
+        inst->manual_port = MANUAL_PORT_DEFAULT;
+        return;
+    }
+    if (fscanf(fp, "%d", &v) == 1 && v >= 1 && v <= 65535) {
+        inst->manual_port = v;
+    } else {
+        inst->manual_port = MANUAL_PORT_DEFAULT;
+    }
+    fclose(fp);
+}
+
+static void sanitize_manual_path(const char *in, char *out, size_t out_len) {
+    size_t src_idx = 0;
+    size_t dst_idx = 0;
+    if (!out || out_len == 0) return;
+    out[0] = '\0';
+
+    if (!in) {
+        snprintf(out, out_len, "%s", MANUAL_PATH_DEFAULT);
+        return;
+    }
+
+    while (in[src_idx] == ' ' || in[src_idx] == '\t' || in[src_idx] == '\n' || in[src_idx] == '\r') {
+        src_idx++;
+    }
+    while (in[src_idx] == '/') {
+        src_idx++;
+    }
+
+    while (in[src_idx] != '\0' && dst_idx + 1 < out_len) {
+        char c = in[src_idx++];
+        if (c == ' ' || c == '\t' || c == '\n' || c == '\r') break;
+        if ((c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') ||
+            (c >= '0' && c <= '9') || c == '_' || c == '-' || c == '/' || c == '.') {
+            out[dst_idx++] = c;
+        }
+    }
+
+    out[dst_idx] = '\0';
+    if (out[0] == '\0') {
+        snprintf(out, out_len, "%s", MANUAL_PATH_DEFAULT);
+    }
+}
+
+static void save_manual_path(streamrtsp_instance_t *inst) {
+    FILE *fp;
+    if (!inst) return;
+    fp = fopen(inst->manual_path_path, "w");
+    if (!fp) return;
+    fprintf(fp, "%s\n", inst->manual_path[0] ? inst->manual_path : MANUAL_PATH_DEFAULT);
+    fclose(fp);
+}
+
+static void load_manual_path(streamrtsp_instance_t *inst) {
+    FILE *fp;
+    char line[256];
+    if (!inst) return;
+    fp = fopen(inst->manual_path_path, "r");
+    if (!fp) {
+        snprintf(inst->manual_path, sizeof(inst->manual_path), "%s", MANUAL_PATH_DEFAULT);
+        return;
+    }
+    if (fgets(line, sizeof(line), fp)) {
+        char cleaned[128];
+        size_t len = strlen(line);
+        while (len > 0 && (line[len - 1] == '\n' || line[len - 1] == '\r')) {
+            line[--len] = '\0';
+        }
+        sanitize_manual_path(line, cleaned, sizeof(cleaned));
+        snprintf(inst->manual_path, sizeof(inst->manual_path), "%s", cleaned);
+    } else {
+        snprintf(inst->manual_path, sizeof(inst->manual_path), "%s", MANUAL_PATH_DEFAULT);
+    }
+    fclose(fp);
+}
+
+static void save_history(streamrtsp_instance_t *inst) {
+    FILE *fp;
+    int i;
+    if (!inst) return;
+    fp = fopen(inst->history_path, "w");
+    if (!fp) return;
+    fprintf(fp, "count=%d\n", inst->history_count);
+    for (i = 0; i < inst->history_count && i < MAX_HISTORY_ENTRIES; i++) {
+        fprintf(fp, "entry_%d=%s\n", i, inst->history_endpoints[i]);
+    }
+    fclose(fp);
+}
+
+static void load_history(streamrtsp_instance_t *inst) {
+    FILE *fp;
+    FILE *legacy_fp;
+    char line[768];
+    char legacy_path[512];
+    int i;
+    if (!inst) return;
+
+    inst->history_count = 0;
+    for (i = 0; i < MAX_HISTORY_ENTRIES; i++) {
+        inst->history_endpoints[i][0] = '\0';
+    }
+
+    fp = fopen(inst->history_path, "r");
+    if (!fp) {
+        /* Migrate once from legacy cache history location if present. */
+        snprintf(legacy_path, sizeof(legacy_path), "%s/history.env", inst->cache_dir);
+        legacy_fp = fopen(legacy_path, "r");
+        if (!legacy_fp) return;
+        fp = legacy_fp;
+    }
+
+    while (fgets(line, sizeof(line), fp)) {
+        char *eq = strchr(line, '=');
+        if (!eq) continue;
+        *eq = '\0';
+        {
+            char *val = eq + 1;
+            size_t len = strlen(val);
+            int idx = -1;
+            while (len > 0 && (val[len - 1] == '\n' || val[len - 1] == '\r')) {
+                val[--len] = '\0';
+            }
+            if (sscanf(line, "entry_%d", &idx) == 1 &&
+                idx >= 0 && idx < MAX_HISTORY_ENTRIES && val[0] != '\0') {
+                snprintf(inst->history_endpoints[idx], sizeof(inst->history_endpoints[idx]), "%s", val);
+                if (idx + 1 > inst->history_count) inst->history_count = idx + 1;
+            }
+        }
+    }
+    fclose(fp);
+
+    /* Persist migrated/loaded history to current location. */
+    save_history(inst);
+}
+
+static void add_history_endpoint(streamrtsp_instance_t *inst, const char *endpoint) {
+    int i;
+    int existing_idx = -1;
+    int write_idx = 1;
+    char entries[MAX_HISTORY_ENTRIES][512];
+
+    if (!inst || !endpoint || endpoint[0] == '\0') return;
+
+    for (i = 0; i < inst->history_count; i++) {
+        if (strcmp(inst->history_endpoints[i], endpoint) == 0) {
+            existing_idx = i;
+            break;
+        }
+    }
+
+    /* Already most recent and unchanged: avoid rewriting history file. */
+    if (existing_idx == 0) return;
+
+    snprintf(entries[0], sizeof(entries[0]), "%s", endpoint);
+    for (i = 0; i < inst->history_count && write_idx < MAX_HISTORY_ENTRIES; i++) {
+        if (inst->history_endpoints[i][0] == '\0') continue;
+        if (strcmp(inst->history_endpoints[i], endpoint) == 0) continue;
+        snprintf(entries[write_idx], sizeof(entries[write_idx]), "%s", inst->history_endpoints[i]);
+        write_idx++;
+    }
+
+    inst->history_count = write_idx;
+    for (i = 0; i < MAX_HISTORY_ENTRIES; i++) {
+        inst->history_endpoints[i][0] = '\0';
+    }
+    for (i = 0; i < inst->history_count; i++) {
+        snprintf(inst->history_endpoints[i], sizeof(inst->history_endpoints[i]), "%s", entries[i]);
+    }
+    save_history(inst);
+}
+
 static void build_manual_endpoint(streamrtsp_instance_t *inst, int suffix, char *out, size_t out_len) {
+    int port;
+    char path[128];
     if (!inst || !out || out_len == 0) return;
     if (suffix < 1 || suffix > 254) suffix = MANUAL_SUFFIX_DEFAULT;
+    port = inst->manual_port;
+    if (port < 1 || port > 65535) port = MANUAL_PORT_DEFAULT;
+    sanitize_manual_path(inst->manual_path, path, sizeof(path));
     if (inst->network_prefix[0] == '\0') {
         detect_network_prefix(inst->network_prefix, sizeof(inst->network_prefix));
     }
-    snprintf(out, out_len, "rtsp://%s.%d:8554/screen", inst->network_prefix, suffix);
+    snprintf(out, out_len, "rtsp://%s.%d:%d/%s", inst->network_prefix, suffix, port, path);
 }
 
 static int create_fifo(streamrtsp_instance_t *inst) {
@@ -639,11 +851,35 @@ static bool classify_backend_exit_and_set_error(streamrtsp_instance_t *inst, int
         return true;
     }
 
+    if (strstr(tail, "404 Not Found") != NULL ||
+        strstr(tail, "Server returned 404 Not Found") != NULL) {
+        set_last_error_detail(inst, "404 endpoint not found");
+        clear_error(inst);
+        set_state(inst, "waiting_for_sender");
+        ap_log("RTSP endpoint not found; waiting for sender and scheduling retry");
+        return true;
+    }
+
     if (strstr(tail, "503Service Unavailable") != NULL ||
         strstr(tail, "Server returned 5XX Server Error reply") != NULL ||
-        strstr(tail, "method DESCRIBE failed") != NULL ||
-        strstr(tail, "Connection refused") != NULL ||
-        strstr(tail, "Connection timed out") != NULL) {
+        strstr(tail, "method DESCRIBE failed") != NULL) {
+        set_last_error_detail(inst, "503 server unavailable");
+        clear_error(inst);
+        set_state(inst, "waiting_for_sender");
+        ap_log("RTSP server unavailable; waiting for sender and scheduling retry");
+        return true;
+    }
+
+    if (strstr(tail, "Connection refused") != NULL) {
+        set_last_error_detail(inst, "RTSP connection refused");
+        clear_error(inst);
+        set_state(inst, "waiting_for_sender");
+        ap_log("RTSP server unavailable; waiting for sender and scheduling retry");
+        return true;
+    }
+
+    if (strstr(tail, "Connection timed out") != NULL) {
+        set_last_error_detail(inst, "RTSP connection timed out");
         clear_error(inst);
         set_state(inst, "waiting_for_sender");
         ap_log("RTSP server unavailable; waiting for sender and scheduling retry");
@@ -807,6 +1043,7 @@ static void pump_pipe(streamrtsp_instance_t *inst) {
             memcpy(samples, merged, sample_count * sizeof(int16_t));
             ring_push(inst, samples, sample_count);
             inst->last_audio_ms = now_ms();
+            set_last_error_detail(inst, "");
             if (strcmp(inst->state, "connecting") == 0 ||
                 strcmp(inst->state, "reconnecting") == 0) {
                 set_state(inst, "buffering");
@@ -832,6 +1069,9 @@ static void* v2_create_instance(const char *module_dir, const char *json_default
     snprintf(inst->last_sender_path, sizeof(inst->last_sender_path), "%s/last_sender.env", inst->cache_dir);
     snprintf(inst->auto_reconnect_path, sizeof(inst->auto_reconnect_path), "%s/auto_reconnect.env", inst->cache_dir);
     snprintf(inst->manual_suffix_path, sizeof(inst->manual_suffix_path), "%s/manual_suffix.env", inst->cache_dir);
+    snprintf(inst->manual_port_path, sizeof(inst->manual_port_path), "%s/manual_port.env", inst->cache_dir);
+    snprintf(inst->manual_path_path, sizeof(inst->manual_path_path), "%s/manual_path.env", inst->cache_dir);
+    snprintf(inst->history_path, sizeof(inst->history_path), "%s/history.env", inst->module_dir);
     detect_network_prefix(inst->network_prefix, sizeof(inst->network_prefix));
 
     inst->fifo_fd = -1;
@@ -842,21 +1082,24 @@ static void* v2_create_instance(const char *module_dir, const char *json_default
     inst->gain = 1.0f;
     inst->buffer_mode = 320;
     inst->manual_suffix = MANUAL_SUFFIX_DEFAULT;
+    inst->manual_port = MANUAL_PORT_DEFAULT;
+    snprintf(inst->manual_path, sizeof(inst->manual_path), "%s", MANUAL_PATH_DEFAULT);
+    inst->history_count = 0;
     inst->last_log_offset = 0;
     set_state(inst, "disconnected");
 
     (void)mkdir(inst->cache_dir, 0755);
     load_auto_reconnect(inst);
     load_manual_suffix(inst);
+    load_manual_port(inst);
+    load_manual_path(inst);
+    load_history(inst);
     load_last_endpoint(inst);
 
     if (create_fifo(inst) != 0) {
         free(inst);
         return NULL;
     }
-
-    /* Always start with discovery so new senders can be found before connect. */
-    start_scan(inst);
 
     ap_log("streamrtsp plugin instance created");
     return inst;
@@ -927,10 +1170,42 @@ static void v2_set_param(void *instance, const char *key, const char *val) {
 
     if (strcmp(key, "manual_suffix") == 0) {
         int suffix = atoi(val);
-        if (suffix < 1) suffix = 1;
+        if (suffix < 0) suffix = 0;
         if (suffix > 254) suffix = 254;
         inst->manual_suffix = suffix;
         save_manual_suffix(inst);
+        return;
+    }
+
+    if (strcmp(key, "manual_port") == 0) {
+        int port = atoi(val);
+        if (port < 1) port = MANUAL_PORT_DEFAULT;
+        if (port > 65535) port = 65535;
+        inst->manual_port = port;
+        save_manual_port(inst);
+        return;
+    }
+
+    if (strcmp(key, "manual_path") == 0) {
+        char cleaned[128];
+        sanitize_manual_path(val, cleaned, sizeof(cleaned));
+        snprintf(inst->manual_path, sizeof(inst->manual_path), "%s", cleaned);
+        save_manual_path(inst);
+        return;
+    }
+
+    if (strcmp(key, "connect_manual") == 0) {
+        char endpoint[512];
+        char msg[704];
+        if (inst->manual_suffix < 1 || inst->manual_suffix > 254) {
+            set_error(inst, "enter IP suffix before connecting");
+            return;
+        }
+        build_manual_endpoint(inst, inst->manual_suffix, endpoint, sizeof(endpoint));
+        snprintf(msg, sizeof(msg), "connect_manual requested: target=%s", endpoint);
+        ap_log(msg);
+        add_history_endpoint(inst, endpoint);
+        (void)supervisor_start(inst, endpoint, false);
         return;
     }
 
@@ -938,11 +1213,31 @@ static void v2_set_param(void *instance, const char *key, const char *val) {
         int suffix = val[0] ? atoi(val) : inst->manual_suffix;
         char endpoint[512];
         char msg[704];
-        if (suffix < 1 || suffix > 254) suffix = inst->manual_suffix;
+        if (suffix < 1 || suffix > 254) {
+            set_error(inst, "invalid IP suffix");
+            return;
+        }
         build_manual_endpoint(inst, suffix, endpoint, sizeof(endpoint));
         snprintf(msg, sizeof(msg), "connect_suffix requested: suffix=%d target=%s", suffix, endpoint);
         ap_log(msg);
+        add_history_endpoint(inst, endpoint);
         (void)supervisor_start(inst, endpoint, false);
+        return;
+    }
+
+    if (strcmp(key, "connect_history") == 0) {
+        int idx = atoi(val);
+        char msg[704];
+        if (idx < 0 || idx >= inst->history_count ||
+            inst->history_endpoints[idx][0] == '\0') {
+            set_error(inst, "invalid history selection");
+            return;
+        }
+        snprintf(msg, sizeof(msg), "connect_history requested: index=%d target=%s",
+                 idx, inst->history_endpoints[idx]);
+        ap_log(msg);
+        add_history_endpoint(inst, inst->history_endpoints[idx]);
+        (void)supervisor_start(inst, inst->history_endpoints[idx], false);
         return;
     }
 
@@ -969,6 +1264,7 @@ static void v2_set_param(void *instance, const char *key, const char *val) {
         }
         snprintf(msg, sizeof(msg), "connect requested: target=%s", target[0] ? target : "(none)");
         ap_log(msg);
+        if (target[0] != '\0') add_history_endpoint(inst, target);
         (void)supervisor_start(inst, target, false);
         return;
     }
@@ -992,6 +1288,7 @@ static void v2_set_param(void *instance, const char *key, const char *val) {
     if (strcmp(key, "disconnect") == 0) {
         ap_log("disconnect requested");
         supervisor_stop(inst);
+        set_last_error_detail(inst, "");
         return;
     }
 
@@ -999,8 +1296,7 @@ static void v2_set_param(void *instance, const char *key, const char *val) {
         const char *target = inst->endpoint;
         if (target[0] == '\0') target = inst->discovered_url;
         if (target[0] == '\0') {
-            ap_log("restart requested without endpoint; triggering scan");
-            start_scan(inst);
+            set_error(inst, "no endpoint configured");
             return;
         }
         {
@@ -1009,6 +1305,24 @@ static void v2_set_param(void *instance, const char *key, const char *val) {
             ap_log(msg);
         }
         (void)supervisor_start(inst, target, false);
+        return;
+    }
+
+    if (strcmp(key, "reset_client") == 0) {
+        ap_log("reset_client requested");
+        supervisor_stop(inst);
+        clear_error(inst);
+        set_last_error_detail(inst, "");
+        inst->endpoint[0] = '\0';
+        inst->discovered_url[0] = '\0';
+        inst->discovered_name[0] = '\0';
+        inst->manual_suffix = MANUAL_SUFFIX_DEFAULT;
+        inst->manual_port = MANUAL_PORT_DEFAULT;
+        snprintf(inst->manual_path, sizeof(inst->manual_path), "%s", MANUAL_PATH_DEFAULT);
+        save_manual_suffix(inst);
+        save_manual_port(inst);
+        save_manual_path(inst);
+        set_state(inst, "disconnected");
         return;
     }
 }
@@ -1094,6 +1408,32 @@ static int v2_get_param(void *instance, const char *key, char *buf, int buf_len)
         return snprintf(buf, (size_t)buf_len, "%d", inst ? inst->manual_suffix : MANUAL_SUFFIX_DEFAULT);
     }
 
+    if (strcmp(key, "manual_port") == 0) {
+        return snprintf(buf, (size_t)buf_len, "%d", inst ? inst->manual_port : MANUAL_PORT_DEFAULT);
+    }
+
+    if (strcmp(key, "manual_path") == 0) {
+        if (inst) {
+            return snprintf(buf, (size_t)buf_len, "%s",
+                            inst->manual_path[0] ? inst->manual_path : MANUAL_PATH_DEFAULT);
+        }
+        return snprintf(buf, (size_t)buf_len, "%s", MANUAL_PATH_DEFAULT);
+    }
+
+    if (strcmp(key, "history_count") == 0) {
+        return snprintf(buf, (size_t)buf_len, "%d", inst ? inst->history_count : 0);
+    }
+
+    if (inst) {
+        int idx = -1;
+        if (sscanf(key, "history_%d", &idx) == 1) {
+            if (idx >= 0 && idx < inst->history_count) {
+                return snprintf(buf, (size_t)buf_len, "%s", inst->history_endpoints[idx]);
+            }
+            return snprintf(buf, (size_t)buf_len, "%s", "");
+        }
+    }
+
     if (strcmp(key, "buffer_health") == 0) {
         if (!inst) return snprintf(buf, (size_t)buf_len, "0");
         avail = ring_available(inst);
@@ -1108,7 +1448,11 @@ static int v2_get_param(void *instance, const char *key, char *buf, int buf_len)
     }
 
     if (strcmp(key, "last_error") == 0) {
-        return snprintf(buf, (size_t)buf_len, "%s", inst ? inst->error_msg : "");
+        if (!inst) return snprintf(buf, (size_t)buf_len, "%s", "");
+        if (inst->last_error_detail[0] != '\0') {
+            return snprintf(buf, (size_t)buf_len, "%s", inst->last_error_detail);
+        }
+        return snprintf(buf, (size_t)buf_len, "%s", inst->error_msg);
     }
 
     return -1;

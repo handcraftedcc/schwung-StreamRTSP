@@ -6,20 +6,27 @@ import { createAction } from '/data/UserData/move-anything/shared/menu_items.mjs
 import { createMenuState, handleMenuInput } from '/data/UserData/move-anything/shared/menu_nav.mjs';
 import { createMenuStack } from '/data/UserData/move-anything/shared/menu_stack.mjs';
 import { drawStackMenu } from '/data/UserData/move-anything/shared/menu_render.mjs';
+import {
+  openTextEntry,
+  isTextEntryActive,
+  handleTextEntryMidi,
+  drawTextEntry,
+  tickTextEntry
+} from '/data/UserData/move-anything/shared/text_entry.mjs';
 
 const SPINNER = ['-', '/', '|', '\\'];
-const TRANSPORT_CONTROLS_VISIBLE = false;
+const DEFAULT_PORT = 8554;
+const DEFAULT_PATH = 'screen';
+const MAX_HISTORY_ENTRIES = 5;
 
 let status = 'stopped';
-let deviceName = 'Move Everything';
-let controlsEnabled = false;
-let trackName = '';
-let trackArtist = '';
-let playbackEvent = '';
-let quality = 320;
+let networkPrefix = '192.168.0';
+let suffixInput = '';
+let portInput = DEFAULT_PORT;
+let pathInput = DEFAULT_PATH;
 let lastError = '';
-let candidateCount = 0;
-let candidates = [];
+let historyEndpoints = [];
+let showHistory = false;
 let shiftHeld = false;
 
 let menuState = createMenuState();
@@ -30,85 +37,38 @@ let spinnerTick = 0;
 let spinnerFrame = 0;
 let needsRedraw = true;
 
-function loadCandidates() {
-  const rawCount = Number.parseInt(host_module_get_param('candidate_count') || '0', 10);
-  const count = Number.isInteger(rawCount) && rawCount > 0 ? Math.min(rawCount, 12) : 0;
-  const next = [];
-  for (let i = 0; i < count; i++) {
-    const name = host_module_get_param(`candidate_${i}_name`) || `Device ${i + 1}`;
-    const url = host_module_get_param(`candidate_${i}_url`) || '';
-    if (!url) continue;
-    next.push({ index: i, name, url });
-  }
-  return next;
+function clampPort(value) {
+  if (!Number.isFinite(value)) return DEFAULT_PORT;
+  const n = Math.trunc(value);
+  if (n < 1) return 1;
+  if (n > 65535) return 65535;
+  return n;
 }
 
-function refreshState() {
-  const prevStatus = status;
-  const prevControls = controlsEnabled;
-  const prevTrackName = trackName;
-  const prevTrackArtist = trackArtist;
-  const prevQuality = quality;
-  const prevPlaybackEvent = playbackEvent;
-  const prevLastError = lastError;
-  const prevCandidateSignature = JSON.stringify(candidates);
-
-  status = host_module_get_param('status') || 'stopped';
-  deviceName = host_module_get_param('device_name') || 'Move Everything';
-  controlsEnabled = host_module_get_param('controls_enabled') === '1';
-  trackName = host_module_get_param('track_name') || '';
-  trackArtist = host_module_get_param('track_artist') || '';
-  playbackEvent = host_module_get_param('playback_event') || '';
-  quality = parseInt(host_module_get_param('quality') || '320', 10);
-  lastError = host_module_get_param('last_error') || '';
-  candidates = loadCandidates();
-  candidateCount = candidates.length;
-  if (![96, 160, 320].includes(quality)) quality = 320;
-
-  const nextCandidateSignature = JSON.stringify(candidates);
-
-  if (
-    prevStatus !== status ||
-    prevControls !== controlsEnabled ||
-    prevTrackName !== trackName ||
-    prevTrackArtist !== trackArtist ||
-    prevQuality !== quality ||
-    prevPlaybackEvent !== playbackEvent ||
-    prevLastError !== lastError ||
-    prevCandidateSignature !== nextCandidateSignature
-  ) {
-    rebuildMenu();
-    needsRedraw = true;
-  }
+function parseSuffixInput(text) {
+  const raw = String(text || '').trim();
+  if (!raw) return '';
+  const match = raw.match(/(\d{1,3})$/);
+  if (!match) return null;
+  const parsed = Number.parseInt(match[1], 10);
+  if (!Number.isInteger(parsed) || parsed < 1 || parsed > 254) return null;
+  return String(parsed);
 }
 
-function statusLabel() {
-  if (status === 'starting') return 'Starting receiver';
-  if (status === 'disconnected') return 'Disconnected';
-  if (status === 'scanning') return 'Scanning LAN';
-  if (status === 'connecting') return 'Connecting';
-  if (status === 'buffering') return 'Buffering';
-  if (status === 'streaming') return 'Streaming';
-  if (status === 'reconnecting') return 'Reconnecting';
-  if (status === 'waiting_for_spotify' || status === 'waiting_for_sender') return 'Waiting for sender';
-  if (status === 'authenticating') return 'Negotiating session';
-  if (status === 'ready') return 'Ready for playback';
-  if (status === 'playing') return 'Receiving audio';
-  if (status === 'stopped') return 'Stopped';
-  if (status === 'error') return 'Error';
-  return status;
+function parsePortInput(text) {
+  const raw = String(text || '').trim();
+  if (!raw) return null;
+  const parsed = Number.parseInt(raw, 10);
+  if (!Number.isInteger(parsed) || parsed < 1 || parsed > 65535) return null;
+  return parsed;
 }
 
-function qualityLabel(value) {
-  if (value === 96) return 'Normal';
-  if (value === 160) return 'Safe';
-  return 'Max Stability';
-}
-
-function nextQuality(value) {
-  if (value === 96) return 160;
-  if (value === 160) return 320;
-  return 96;
+function parsePathInput(text) {
+  const raw = String(text || '').trim();
+  if (!raw) return DEFAULT_PATH;
+  const cleaned = raw.replace(/^\/+/, '').trim();
+  if (!cleaned) return DEFAULT_PATH;
+  return cleaned.slice(0, 96);
 }
 
 function trackPrefix(value, maxLen) {
@@ -117,75 +77,257 @@ function trackPrefix(value, maxLen) {
   return `${value.slice(0, maxLen - 1)}…`;
 }
 
-function isDiscoveryInProgress() {
-  return (
-    status === 'starting' ||
-    status === 'scanning' ||
-    status === 'connecting' ||
-    status === 'buffering' ||
-    status === 'reconnecting' ||
-    status === 'authenticating'
-  );
+function applyManualFieldsToPlugin() {
+  const suffix = suffixInput ? Number.parseInt(suffixInput, 10) : 0;
+  host_module_set_param('manual_suffix', String(Number.isFinite(suffix) ? suffix : 0));
+  host_module_set_param('manual_port', String(clampPort(portInput)));
+  host_module_set_param('manual_path', pathInput || DEFAULT_PATH);
 }
 
-function shouldShowDeviceList() {
-  if (candidateCount <= 0) return false;
-  if (isDiscoveryInProgress()) return false;
-  if (status === 'streaming' || status === 'playing' || status === 'ready') return false;
-  return true;
+function openSuffixEditor() {
+  openTextEntry({
+    title: 'IP Suffix',
+    initialText: suffixInput,
+    onConfirm: (value) => {
+      const parsed = parseSuffixInput(value);
+      if (parsed === null) return;
+      suffixInput = parsed;
+      applyManualFieldsToPlugin();
+      rebuildMenu();
+      needsRedraw = true;
+    },
+    onCancel: () => {
+      needsRedraw = true;
+    }
+  });
+  needsRedraw = true;
+}
+
+function openPortEditor() {
+  openTextEntry({
+    title: 'RTSP Port',
+    initialText: String(portInput),
+    onConfirm: (value) => {
+      const parsed = parsePortInput(value);
+      if (parsed === null) return;
+      portInput = clampPort(parsed);
+      applyManualFieldsToPlugin();
+      rebuildMenu();
+      needsRedraw = true;
+    },
+    onCancel: () => {
+      needsRedraw = true;
+    }
+  });
+  needsRedraw = true;
+}
+
+function openPathEditor() {
+  openTextEntry({
+    title: 'RTSP Path',
+    initialText: pathInput,
+    onConfirm: (value) => {
+      pathInput = parsePathInput(value);
+      applyManualFieldsToPlugin();
+      rebuildMenu();
+      needsRedraw = true;
+    },
+    onCancel: () => {
+      needsRedraw = true;
+    }
+  });
+  needsRedraw = true;
+}
+
+function parseEndpointParts(endpoint) {
+  const raw = String(endpoint || '').trim();
+  const m = raw.match(/^rtsp:\/\/([^/:]+)(?::(\d+))?(\/[^?#]*)?/i);
+  if (!m) return null;
+
+  const host = m[1];
+  const port = Number.parseInt(m[2] || String(DEFAULT_PORT), 10);
+  const path = parsePathInput((m[3] || '').replace(/^\//, ''));
+  const hostMatch = host.match(/^(\d+)\.(\d+)\.(\d+)\.(\d+)$/);
+
+  if (!hostMatch) {
+    return {
+      prefix: '',
+      suffix: '',
+      port: Number.isInteger(port) ? clampPort(port) : DEFAULT_PORT,
+      path
+    };
+  }
+
+  return {
+    prefix: `${hostMatch[1]}.${hostMatch[2]}.${hostMatch[3]}`,
+    suffix: hostMatch[4],
+    port: Number.isInteger(port) ? clampPort(port) : DEFAULT_PORT,
+    path
+  };
+}
+
+function loadHistory() {
+  const rawCount = Number.parseInt(host_module_get_param('history_count') || '0', 10);
+  const count = Number.isInteger(rawCount) && rawCount > 0 ? Math.min(rawCount, MAX_HISTORY_ENTRIES) : 0;
+  const next = [];
+  for (let i = 0; i < count; i++) {
+    const endpoint = host_module_get_param(`history_${i}`) || '';
+    if (!endpoint) continue;
+    next.push(endpoint);
+  }
+  return next;
+}
+
+function historyLabel(endpoint) {
+  const parsed = parseEndpointParts(endpoint);
+  if (!parsed) return trackPrefix(endpoint, 20);
+  const suffix = parsed.suffix || '---';
+  const path = parsed.path || DEFAULT_PATH;
+  return trackPrefix(`${suffix}/${path}`, 20);
+}
+
+function refreshState() {
+  const prevStatus = status;
+  const prevLastError = lastError;
+  const prevPrefix = networkPrefix;
+  const prevSuffix = suffixInput;
+  const prevPort = portInput;
+  const prevPath = pathInput;
+  const prevHistorySig = JSON.stringify(historyEndpoints);
+
+  status = host_module_get_param('status') || 'stopped';
+  networkPrefix = host_module_get_param('network_prefix') || '192.168.0';
+  lastError = host_module_get_param('last_error') || '';
+
+  const manualSuffixRaw = Number.parseInt(host_module_get_param('manual_suffix') || '0', 10);
+  if (Number.isInteger(manualSuffixRaw) && manualSuffixRaw >= 1 && manualSuffixRaw <= 254) {
+    suffixInput = String(manualSuffixRaw);
+  } else {
+    suffixInput = '';
+  }
+
+  const manualPortRaw = Number.parseInt(host_module_get_param('manual_port') || String(DEFAULT_PORT), 10);
+  portInput = clampPort(manualPortRaw);
+  pathInput = parsePathInput(host_module_get_param('manual_path') || DEFAULT_PATH);
+
+  historyEndpoints = loadHistory();
+
+  const nextHistorySig = JSON.stringify(historyEndpoints);
+
+  if (
+    prevStatus !== status ||
+    prevLastError !== lastError ||
+    prevPrefix !== networkPrefix ||
+    prevSuffix !== suffixInput ||
+    prevPort !== portInput ||
+    prevPath !== pathInput ||
+    prevHistorySig !== nextHistorySig
+  ) {
+    rebuildMenu();
+    needsRedraw = true;
+  }
+}
+
+function connectManual() {
+  applyManualFieldsToPlugin();
+  host_module_set_param('connect_manual', '1');
+  needsRedraw = true;
+}
+
+function disconnectManual() {
+  host_module_set_param('disconnect', '1');
+  needsRedraw = true;
+}
+
+function selectHistory(index) {
+  if (index < 0 || index >= historyEndpoints.length) return;
+
+  const endpoint = historyEndpoints[index];
+  const parsed = parseEndpointParts(endpoint);
+  if (parsed) {
+    if (parsed.prefix) {
+      networkPrefix = parsed.prefix;
+    }
+    suffixInput = parsed.suffix || '';
+    portInput = clampPort(parsed.port || DEFAULT_PORT);
+    pathInput = parsePathInput(parsed.path || DEFAULT_PATH);
+    applyManualFieldsToPlugin();
+  }
+
+  host_module_set_param('connect_history', String(index));
+  showHistory = false;
+  rebuildMenu();
+  needsRedraw = true;
+}
+
+function resetClient() {
+  suffixInput = '';
+  portInput = DEFAULT_PORT;
+  pathInput = DEFAULT_PATH;
+  showHistory = false;
+  applyManualFieldsToPlugin();
+  host_module_set_param('reset_client', '1');
+  rebuildMenu();
+  needsRedraw = true;
 }
 
 function buildRootItems() {
   const items = [];
-  const sourceLabel = trackName || '(none)';
-  const detailsLabel = status === 'error' && lastError
-    ? `Error: ${trackPrefix(lastError, 16)}`
-    : (trackArtist ? trackPrefix(trackArtist, 18) : '(none)');
-  const showDeviceList = shouldShowDeviceList();
-  const scanningDevices = isDiscoveryInProgress();
+  const suffixLabel = suffixInput || '---';
+  const lastErrorLabel = lastError ? trackPrefix(lastError, 12) : 'none';
 
-  items.push(createAction(`Sender: ${deviceName}`, () => {}));
-
-  items.push(createAction(`Source: ${trackPrefix(sourceLabel, 19)}`, () => {}));
-  items.push(createAction(`Details: ${detailsLabel}`, () => {}));
-
-  if (showDeviceList) {
-    for (const candidate of candidates) {
-      const title = candidate.name || candidate.url;
-      items.push(createAction(`[Device: ${trackPrefix(title, 16)}]`, () => {
-        host_module_set_param('connect_candidate', String(candidate.index));
-        needsRedraw = true;
-      }));
-    }
-  } else if (scanningDevices) {
-    items.push(createAction('Devices: scanning...', () => {}));
-  } else {
-    items.push(createAction('Devices: (none found)', () => {}));
-  }
-
-  items.push(createAction(`[Buffer: ${qualityLabel(quality)}]`, () => {
-    const updated = nextQuality(quality);
-    host_module_set_param('quality', String(updated));
-    needsRedraw = true;
+  items.push(createAction(`IP Suffix: ${suffixLabel}`, () => {
+    openSuffixEditor();
   }));
 
-  items.push(createAction('[Scan LAN]', () => {
-    host_module_set_param('scan', '1');
-    needsRedraw = true;
+  items.push(createAction(`Port: ${portInput}`, () => {
+    openPortEditor();
   }));
 
-  items.push(createAction('[Connect Last]', () => {
-    host_module_set_param('connect_last', '1');
-    needsRedraw = true;
+  items.push(createAction(`Path: /${trackPrefix(pathInput, 14)}`, () => {
+    openPathEditor();
+  }));
+
+  items.push(createAction('[Connect]', () => {
+    connectManual();
   }));
 
   items.push(createAction('[Disconnect]', () => {
-    host_module_set_param('disconnect', '1');
+    disconnectManual();
+  }));
+
+  items.push(createAction(`Last error: ${lastErrorLabel}`, () => {}));
+
+  items.push(createAction('[Past Connections]', () => {
+    showHistory = true;
+    rebuildMenu();
     needsRedraw = true;
   }));
 
-  items.push(createAction('[Restart Session]', () => {
-    host_module_set_param('restart', '1');
+  items.push(createAction('[Reset]', () => {
+    resetClient();
+  }));
+
+  return items;
+}
+
+function buildHistoryItems() {
+  const items = [];
+
+  if (historyEndpoints.length === 0) {
+    items.push(createAction('(No saved connections)', () => {}));
+  } else {
+    for (let i = 0; i < historyEndpoints.length; i++) {
+      const endpoint = historyEndpoints[i];
+      items.push(createAction(historyLabel(endpoint), () => {
+        selectHistory(i);
+      }));
+    }
+  }
+
+  items.push(createAction('[Back]', () => {
+    showHistory = false;
+    rebuildMenu();
     needsRedraw = true;
   }));
 
@@ -193,55 +335,47 @@ function buildRootItems() {
 }
 
 function rebuildMenu() {
-  const items = buildRootItems();
+  const items = showHistory ? buildHistoryItems() : buildRootItems();
+  const title = showHistory ? 'Past Connections' : 'StreamRTSP';
   const current = menuStack.current();
+
   if (!current) {
     menuStack.push({
-      title: 'StreamRTSP',
+      title,
       items,
       selectedIndex: 0
     });
     menuState.selectedIndex = 0;
   } else {
-    current.title = 'StreamRTSP';
+    current.title = title;
     current.items = items;
     if (menuState.selectedIndex >= items.length) {
       menuState.selectedIndex = Math.max(0, items.length - 1);
     }
   }
+
   needsRedraw = true;
 }
 
-function currentFooter() {
-  if (status === 'error' && lastError) {
-    return trackPrefix(lastError, 20);
-  }
-
-  const waitingStates = status === 'starting' ||
-    status === 'scanning' ||
-    status === 'connecting' ||
-    status === 'buffering' ||
-    status === 'reconnecting' ||
-    status === 'waiting_for_spotify' ||
-    status === 'authenticating';
-  const activity = waitingStates ? 'Working' : '';
-  if (activity) return `${activity} ${SPINNER[spinnerFrame]}`;
+function statusLabel() {
+  if (status === 'connecting') return `Connecting ${SPINNER[spinnerFrame]}`;
+  if (status === 'reconnecting') return `Retrying ${SPINNER[spinnerFrame]}`;
+  if (status === 'buffering') return `Buffering ${SPINNER[spinnerFrame]}`;
+  if (status === 'waiting_for_sender') return `Waiting ${SPINNER[spinnerFrame]}`;
   if (status === 'streaming' || status === 'playing') return 'Connected';
-  if (status === 'ready') return 'Idle';
-  return statusLabel();
+  if (status === 'error' && lastError) return trackPrefix(lastError, 20);
+  return trackPrefix(status || 'disconnected', 20);
 }
 
 globalThis.init = function () {
   status = 'stopped';
-  deviceName = 'Move Everything';
-  controlsEnabled = false;
-  trackName = '';
-  trackArtist = '';
-  playbackEvent = '';
-  quality = 320;
+  networkPrefix = '192.168.0';
+  suffixInput = '';
+  portInput = DEFAULT_PORT;
+  pathInput = DEFAULT_PATH;
   lastError = '';
-  candidateCount = 0;
-  candidates = [];
+  historyEndpoints = [];
+  showHistory = false;
   shiftHeld = false;
 
   menuState = createMenuState();
@@ -251,23 +385,29 @@ globalThis.init = function () {
   spinnerFrame = 0;
   needsRedraw = true;
 
+  refreshState();
   rebuildMenu();
 };
 
 globalThis.tick = function () {
+  if (isTextEntryActive()) {
+    if (tickTextEntry()) {
+      needsRedraw = true;
+    }
+    drawTextEntry();
+    return;
+  }
+
   tickCounter = (tickCounter + 1) % 6;
   if (tickCounter === 0) {
     refreshState();
   }
 
   if (
-    status === 'starting' ||
-    status === 'scanning' ||
     status === 'connecting' ||
-    status === 'buffering' ||
     status === 'reconnecting' ||
-    status === 'waiting_for_spotify' ||
-    status === 'authenticating'
+    status === 'buffering' ||
+    status === 'waiting_for_sender'
   ) {
     spinnerTick = (spinnerTick + 1) % 3;
     if (spinnerTick === 0) {
@@ -288,7 +428,7 @@ globalThis.tick = function () {
     drawStackMenu({
       stack: menuStack,
       state: menuState,
-      footer: currentFooter()
+      footer: statusLabel()
     });
 
     needsRedraw = false;
@@ -296,6 +436,13 @@ globalThis.tick = function () {
 };
 
 globalThis.onMidiMessageInternal = function (data) {
+  if (isTextEntryActive()) {
+    if (handleTextEntryMidi(data)) {
+      needsRedraw = true;
+    }
+    return;
+  }
+
   const statusByte = data[0] & 0xF0;
   const cc = data[1];
   const val = data[2];
@@ -322,6 +469,12 @@ globalThis.onMidiMessageInternal = function (data) {
     state: menuState,
     stack: menuStack,
     onBack: () => {
+      if (showHistory) {
+        showHistory = false;
+        rebuildMenu();
+        needsRedraw = true;
+        return;
+      }
       host_return_to_menu();
     },
     shiftHeld
