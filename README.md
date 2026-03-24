@@ -1,4 +1,4 @@
-# Move Everything - StreamRTSP
+# Schwung - StreamRTSP
 
 StreamRTSP is a Sound Generator module for [Schwung](https://github.com/charlesvestal/schwung) on Ableton Move.
 
