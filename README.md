@@ -39,7 +39,7 @@ Build pipeline notes:
 
 Default install target:
 - Device: `root@move.local`
-- Path: `/data/UserData/move-anything/modules/sound_generators/streamrtsp/`
+- Path: `/data/UserData/schwung/modules/sound_generators/streamrtsp/`
 
 ## Project Layout
 
