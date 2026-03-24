@@ -21,8 +21,8 @@
 #define RING_SAMPLES (MOVE_SAMPLE_RATE * 2 * RING_SECONDS)
 #define AUDIO_IDLE_MS 1500
 #define RECONNECT_COOLDOWN_MS 1500
-#define LOG_PATH "/data/UserData/move-anything/cache/streamrtsp-runtime.log"
-#define CACHE_DIR_DEFAULT "/data/UserData/move-anything/cache/streamrtsp"
+#define MODULE_LOG_DEFAULT "/data/UserData/schwung/modules/sound_generators/streamrtsp/streamrtsp-runtime.log"
+#define CACHE_DIR_DEFAULT "/data/UserData/schwung/cache/streamrtsp"
 #define MANUAL_SUFFIX_DEFAULT 0
 #define MANUAL_PORT_DEFAULT 8554
 #define MANUAL_PATH_DEFAULT "screen"
@@ -31,6 +31,7 @@
 
 static const host_api_v1_t *g_host = NULL;
 static int g_instance_counter = 0;
+static char g_log_path[512] = MODULE_LOG_DEFAULT;
 
 typedef struct {
     char module_dir[512];
@@ -43,6 +44,7 @@ typedef struct {
     char manual_port_path[512];
     char manual_path_path[512];
     char history_path[512];
+    char log_path[512];
     char endpoint[512];
     char discovered_url[512];
     char discovered_name[128];
@@ -91,7 +93,7 @@ static void ap_log(const char *msg) {
     FILE *fp;
     if (!msg || msg[0] == '\0') return;
 
-    fp = fopen(LOG_PATH, "a");
+    fp = fopen(g_log_path, "a");
     if (fp) {
         fprintf(fp, "%s\n", msg);
         fclose(fp);
@@ -669,7 +671,7 @@ static int supervisor_start(streamrtsp_instance_t *inst, const char *endpoint, b
     supervisor_stop(inst);
     clear_error(inst);
     inst->last_log_offset = 0;
-    if (stat(LOG_PATH, &st) == 0 && st.st_size > 0) {
+    if (stat(inst->log_path, &st) == 0 && st.st_size > 0) {
         inst->last_log_offset = st.st_size;
     }
 
@@ -690,7 +692,7 @@ static int supervisor_start(streamrtsp_instance_t *inst, const char *endpoint, b
             close(devnull);
         }
 
-        logfd = open(LOG_PATH, O_WRONLY | O_CREAT | O_APPEND, 0644);
+        logfd = open(inst->log_path, O_WRONLY | O_CREAT | O_APPEND, 0644);
         if (logfd >= 0) {
             dup2(logfd, STDERR_FILENO);
             close(logfd);
@@ -702,7 +704,7 @@ static int supervisor_start(streamrtsp_instance_t *inst, const char *endpoint, b
               "streamrtsp_backend.sh",
               inst->fifo_path,
               endpoint,
-              LOG_PATH,
+              inst->log_path,
               (char *)NULL);
         _exit(127);
     }
@@ -798,6 +800,7 @@ static void parse_discovery_file(streamrtsp_instance_t *inst) {
 
 static void read_runtime_log_since_offset(const streamrtsp_instance_t *inst, char *buf, size_t buf_len) {
     FILE *fp;
+    const char *log_path;
     long end = 0;
     long start = 0;
     size_t n = 0;
@@ -805,7 +808,8 @@ static void read_runtime_log_since_offset(const streamrtsp_instance_t *inst, cha
     if (!buf || buf_len == 0) return;
     buf[0] = '\0';
 
-    fp = fopen(LOG_PATH, "r");
+    log_path = (inst && inst->log_path[0] != '\0') ? inst->log_path : g_log_path;
+    fp = fopen(log_path, "r");
     if (!fp) return;
 
     if (fseek(fp, 0, SEEK_END) == 0) {
@@ -934,7 +938,7 @@ static void start_scan(streamrtsp_instance_t *inst) {
     }
 
     if (pid == 0) {
-        int logfd = open(LOG_PATH, O_WRONLY | O_CREAT | O_APPEND, 0644);
+        int logfd = open(inst->log_path, O_WRONLY | O_CREAT | O_APPEND, 0644);
         (void)setpgid(0, 0);
         if (logfd >= 0) {
             dup2(logfd, STDERR_FILENO);
@@ -1072,6 +1076,8 @@ static void* v2_create_instance(const char *module_dir, const char *json_default
     snprintf(inst->manual_port_path, sizeof(inst->manual_port_path), "%s/manual_port.env", inst->cache_dir);
     snprintf(inst->manual_path_path, sizeof(inst->manual_path_path), "%s/manual_path.env", inst->cache_dir);
     snprintf(inst->history_path, sizeof(inst->history_path), "%s/history.env", inst->module_dir);
+    snprintf(inst->log_path, sizeof(inst->log_path), "%s/streamrtsp-runtime.log", inst->module_dir);
+    snprintf(g_log_path, sizeof(g_log_path), "%s", inst->log_path);
     detect_network_prefix(inst->network_prefix, sizeof(inst->network_prefix));
 
     inst->fifo_fd = -1;

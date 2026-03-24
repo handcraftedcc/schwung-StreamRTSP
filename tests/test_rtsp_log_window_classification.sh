@@ -18,8 +18,8 @@ if ! rg -q 'read_runtime_log_since_offset' "$plugin_file"; then
   exit 1
 fi
 
-if ! rg -q 'stat\(LOG_PATH' "$plugin_file"; then
-  echo "FAIL: supervisor start should capture current log file size as offset baseline" >&2
+if ! rg -q 'stat\(inst->log_path' "$plugin_file"; then
+  echo "FAIL: supervisor start should capture current module-local log file size as offset baseline" >&2
   exit 1
 fi
 

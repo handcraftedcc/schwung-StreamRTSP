@@ -1,18 +1,18 @@
-import { MoveShift } from '/data/UserData/move-anything/shared/constants.mjs';
+import { MoveShift } from '/data/UserData/schwung/shared/constants.mjs';
 
-import { isCapacitiveTouchMessage } from '/data/UserData/move-anything/shared/input_filter.mjs';
+import { isCapacitiveTouchMessage } from '/data/UserData/schwung/shared/input_filter.mjs';
 
-import { createAction } from '/data/UserData/move-anything/shared/menu_items.mjs';
-import { createMenuState, handleMenuInput } from '/data/UserData/move-anything/shared/menu_nav.mjs';
-import { createMenuStack } from '/data/UserData/move-anything/shared/menu_stack.mjs';
-import { drawStackMenu } from '/data/UserData/move-anything/shared/menu_render.mjs';
+import { createAction } from '/data/UserData/schwung/shared/menu_items.mjs';
+import { createMenuState, handleMenuInput } from '/data/UserData/schwung/shared/menu_nav.mjs';
+import { createMenuStack } from '/data/UserData/schwung/shared/menu_stack.mjs';
+import { drawStackMenu } from '/data/UserData/schwung/shared/menu_render.mjs';
 import {
   openTextEntry,
   isTextEntryActive,
   handleTextEntryMidi,
   drawTextEntry,
   tickTextEntry
-} from '/data/UserData/move-anything/shared/text_entry.mjs';
+} from '/data/UserData/schwung/shared/text_entry.mjs';
 
 const SPINNER = ['-', '/', '|', '\\'];
 const DEFAULT_PORT = 8554;

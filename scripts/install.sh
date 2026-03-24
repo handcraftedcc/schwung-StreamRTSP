@@ -6,7 +6,7 @@ REPO_ROOT="$(dirname "$SCRIPT_DIR")"
 MODULE_ID="streamrtsp"
 DEVICE_HOST="${DEVICE_HOST:-move.local}"
 RESTART_UI="${RESTART_UI:-0}"
-REMOTE_BASE="/data/UserData/move-anything/modules/sound_generators"
+REMOTE_BASE="/data/UserData/schwung/modules/sound_generators"
 REMOTE_DIR="$REMOTE_BASE/$MODULE_ID"
 DIST_DIR="$REPO_ROOT/dist/$MODULE_ID"
 
@@ -27,7 +27,7 @@ ssh "root@$DEVICE_HOST" "chown -R ableton:users $REMOTE_DIR"
 case "$RESTART_UI" in
   1|true|TRUE|yes|YES|on|ON)
     echo "Restarting display-server to reload module UI..."
-    ssh "root@$DEVICE_HOST" "pkill -f '/data/UserData/move-anything/display-server' || true"
+    ssh "root@$DEVICE_HOST" "pkill -f '/data/UserData/schwung/display-server' || true"
     ;;
 esac
 

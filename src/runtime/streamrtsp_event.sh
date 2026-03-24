@@ -1,7 +1,7 @@
 #!/bin/sh
 set -eu
 
-STATE_FILE="/data/UserData/move-anything/cache/streamrtsp-nowplaying.env"
+STATE_FILE="/data/UserData/schwung/cache/streamrtsp-nowplaying.env"
 TMP_FILE="${STATE_FILE}.tmp.$$"
 
 clean_value() {

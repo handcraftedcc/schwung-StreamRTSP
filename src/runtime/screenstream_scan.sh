@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-CACHE_DIR="${1:-/data/UserData/move-anything/cache/streamrtsp}"
+CACHE_DIR="${1:-/data/UserData/schwung/cache/streamrtsp}"
 OUT_FILE="$CACHE_DIR/scan.env"
 TMP_FILE="${OUT_FILE}.tmp.$$"
 
