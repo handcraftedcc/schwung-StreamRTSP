@@ -8,6 +8,9 @@ RUN dpkg --add-architecture arm64 && \
     make \
     git \
     pkg-config \
+    perl \
+    nasm \
+    yasm \
     curl \
     ca-certificates \
     xz-utils \

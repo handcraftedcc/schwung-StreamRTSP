@@ -27,8 +27,8 @@ Build output:
 - `dist/streamrtsp-module.tar.gz`
 
 Build pipeline notes:
-- Bundles ARM64 `ffmpeg` into `dist/streamrtsp/bin/ffmpeg`
-- Uses pinned checksum-verified archive from BtbN FFmpeg Builds
+- Builds and bundles a minimal ARM64 `ffmpeg` into `dist/streamrtsp/bin/ffmpeg`
+- Compiles from pinned FFmpeg source with only RTSP + required audio decode/output components
 - Set `SKIP_FFMPEG_BUNDLE=1` to skip bundling for local experiments
 
 ## Install
