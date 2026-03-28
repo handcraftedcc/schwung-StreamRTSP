@@ -2,7 +2,7 @@
   "id": "streamrtsp",
   "name": "StreamRTSP",
   "abbrev": "RTSP",
-  "version": "0.1.6",
+  "version": "0.1.7",
   "description": "Local RTSP audio receiver for Android ScreenStream on Move",
   "author": "dom",
   "license": "MIT",
