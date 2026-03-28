@@ -47,23 +47,23 @@ If step 6 is missing, you only get a tag and workflow run, not a release asset.
 
 ## 3. Build container requirements (cross builds)
 
-For Rust/C cross builds (like librespot + DSP), ensure the Docker image includes:
+For cross builds, ensure the Docker image includes:
 
 - host compiler toolchain:
-  - `gcc` (needed for Rust build scripts/proc-macro build steps)
+  - `gcc`
 - target cross compiler:
   - e.g. `gcc-aarch64-linux-gnu`
 - target dev libraries:
   - e.g. `libssl-dev:arm64`, `libasound2-dev:arm64`
-- rustup target:
-  - e.g. `aarch64-unknown-linux-gnu`
+- extra native tools required by your build:
+  - e.g. `perl`, `nasm`, `yasm` (for FFmpeg source builds)
 
-In cross Rust builds, set:
+In cross Rust builds (if applicable), set:
 - `CARGO_TARGET_<TARGET>_LINKER`
 - `PKG_CONFIG_ALLOW_CROSS=1`
 - `PKG_CONFIG_LIBDIR` and `PKG_CONFIG_PATH` to target pkg-config directory
 
-Without those, OpenSSL detection usually fails in CI.
+Without those, OpenSSL/pkg-config detection can fail in CI.
 
 ## 4. Release metadata tests (recommended)
 
@@ -77,7 +77,7 @@ Add script tests that fail fast when release wiring drifts:
     - release publish step
 - `tests/test_scaffold_identity.sh`
   - validates module id/name + release URL shape
-- `tests/test_librespot_scaffold.sh` (or module-specific build test)
+- `tests/test_build_scaffold.sh` (or module-specific build test)
   - validates build script and Docker cross prerequisites
 
 Run these locally and in CI before tagging.

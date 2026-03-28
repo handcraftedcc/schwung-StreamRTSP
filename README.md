@@ -2,19 +2,14 @@
 
 StreamRTSP is a Sound Generator module for [Schwung](https://github.com/charlesvestal/schwung) on Ableton Move.
 
-It is being built as a local-only Android ScreenStream RTSP audio receiver:
+It is a local-only Android ScreenStream RTSP audio receiver:
 - RTSP transport for v1
 - local network only
-- discovery-first workflow (no manual IP in normal use)
+- manual endpoint input workflow (IP suffix, port, path)
 - quality/stability over low latency
 
 Recommended use with [ScreenStream](https://play.google.com/store/apps/details?id=info.dvkr.screenstream&hl=en_US) on android - make sure to set protocol to RTSP and enable "device audio" under audio parameters.
 For windows you can use this [RTSP python streaming script](https://github.com/handcraftedcc/RTSPWindowsAudioStreamScript) (check readme for how to get it running).
-
-## Current Status
-
-This repository is in active migration from older scaffold naming to StreamRTSP.
-Core packaging/build/runtime file names now use `streamrtsp` naming.
 
 ## Build
 
@@ -40,6 +35,15 @@ Build pipeline notes:
 Default install target:
 - Device: `root@move.local`
 - Path: `/data/UserData/schwung/modules/sound_generators/streamrtsp/`
+
+## Getting Started
+
+1. Open your RTSP server app (for example ScreenStream) and note the server endpoint.
+2. In StreamRTSP, enter:
+   - IP suffix: the last part of the IP (`233` for `192.168.0.233`)
+   - Port: the server port (`8554` in `:8554`)
+   - Path: the stream path (`screen` or `screenlive`, without leading `/`)
+3. Press `Connect` and wait for audio.
 
 ## Project Layout
 

@@ -4,16 +4,17 @@
     {
       "title": "Overview",
       "lines": [
-        "Local RTSP audio",
-        "receiver for Move.",
+        "Manual RTSP",
+        "audio receiver",
+        "for Move.",
         "",
-        "Designed for",
+        "Enter server",
+        "IP suffix,",
+        "port, path.",
+        "",
+        "Works with",
         "Android",
-        "ScreenStream",
-        "senders.",
-        "",
-        "Audio-only path,",
-        "quality first."
+        "ScreenStream."
       ]
     },
     {
@@ -25,40 +26,48 @@
         "2. Install:",
         "   ./scripts/install.sh",
         "",
-        "3. Start sender",
-        "   on Android",
+        "3. Start RTSP",
+        "   sender app",
         "",
-        "4. Load module",
-        "   in a slot",
+        "4. Enter IP",
+        "   suffix/port/",
+        "   path",
         "",
-        "5. Connect to",
-        "   discovered RTSP",
-        "   sender"
+        "5. Press",
+        "   Connect"
       ]
     },
     {
       "title": "Controls",
       "lines": [
-        "Scan: refresh",
-        "local sender list",
+        "IP Suffix:",
+        "last IP octet",
         "",
-        "Connect/Restart:",
-        "manage session",
+        "Port / Path:",
+        "server values",
         "",
-        "Quality mode:",
-        "stability-first",
-        "buffering policy"
+        "Connect:",
+        "start session",
+        "",
+        "Disconnect:",
+        "stop session",
+        "",
+        "Past Conns:",
+        "reuse targets",
+        "",
+        "Reset:",
+        "clear + reset"
       ]
     },
     {
       "title": "Status",
       "lines": [
         "Disconnected",
-        "Scanning",
         "Connecting",
+        "Retrying",
         "Buffering",
-        "Streaming",
-        "Reconnecting",
+        "Waiting",
+        "Connected",
         "Error"
       ]
     }
