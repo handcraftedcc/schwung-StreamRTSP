@@ -13,7 +13,7 @@ For windows you can use this [RTSP python streaming script](https://github.com/h
 
 ## Getting Started
 
-1. Open your RTSP server app (for example ScreenStream) and note the server endpoint.
+1. Open your RTSP server app (for example ScreenStream) and note the server endpoint. If using ScreenStream make sure to enable device audio under audio settings.
 2. In StreamRTSP, enter:
    - IP suffix: the last part of the IP (`233` for `192.168.0.233`)
    - Port: the server port (`8554` in `:8554`)
